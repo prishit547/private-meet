@@ -15,7 +15,9 @@ export function useWebRTC(roomId, iceServers = []) {
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const peerConnectionsRef = useRef(new Map()); // socketId -> RTCPeerConnection
-  const screenSendersRef = useRef(new Map());   // socketId -> RTCRtpSender
+  const audioSendersRef = useRef(new Map());   // socketId -> RTCRtpSender (audio)
+  const videoSendersRef = useRef(new Map());   // socketId -> RTCRtpSender (webcam)
+  const screenSendersRef = useRef(new Map());   // socketId -> RTCRtpSender[] (screen share tracks)
   const iceCandidatesQueueRef = useRef(new Map()); // socketId -> RTCIceCandidate[]
   const remotePeersRef = useRef(new Map());
 
@@ -56,48 +58,65 @@ export function useWebRTC(roomId, iceServers = []) {
     });
   }, []);
 
-  // Initialize local webcam and mic
+  // Initialize local webcam and mic (only activates hardware if requested)
   const startLocalStream = useCallback(async (audioInitial = true, videoInitial = true) => {
     try {
       if (localStreamRef.current) {
         return localStreamRef.current;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
-        }
-      });
-
-      // Apply initial mute states if specified
-      stream.getAudioTracks().forEach(track => { track.enabled = audioInitial; });
-      stream.getVideoTracks().forEach(track => { track.enabled = videoInitial; });
-
-      setIsAudioMuted(!audioInitial);
-      setIsVideoMuted(!videoInitial);
-
+      const stream = new MediaStream();
       localStreamRef.current = stream;
+
+      // 1. Microphone Hardware
+      if (audioInitial) {
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+          audioStream.getAudioTracks().forEach(track => {
+            stream.addTrack(track);
+          });
+          setIsAudioMuted(false);
+        } catch (err) {
+          console.warn('Audio acquisition failed:', err);
+          setIsAudioMuted(true);
+        }
+      } else {
+        setIsAudioMuted(true);
+      }
+
+      // 2. Camera Hardware
+      if (videoInitial) {
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: 'user'
+            }
+          });
+          videoStream.getVideoTracks().forEach(track => {
+            stream.addTrack(track);
+          });
+          setIsVideoMuted(false);
+        } catch (err) {
+          console.warn('Video acquisition failed:', err);
+          setIsVideoMuted(true);
+        }
+      } else {
+        setIsVideoMuted(true);
+      }
+
       setLocalStream(stream);
       return stream;
     } catch (err) {
-      console.warn('Could not acquire both audio and video, trying audio only:', err);
-      try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        localStreamRef.current = audioStream;
-        setLocalStream(audioStream);
-        setIsVideoMuted(true);
-        return audioStream;
-      } catch (audioErr) {
-        console.error('Failed to get any local media stream:', audioErr);
-        return null;
-      }
+      console.error('Failed to get any local media stream:', err);
+      return null;
     }
   }, []);
 
@@ -111,11 +130,31 @@ export function useWebRTC(roomId, iceServers = []) {
     peerConnectionsRef.current.set(peerSocketId, pc);
     iceCandidatesQueueRef.current.set(peerSocketId, []);
 
-    // Add local tracks (webcam/mic) to peer connection
+    // Add local tracks (webcam/mic) or initialize transceivers so tracks can be added later without renegotiation
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current);
-      });
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        const sender = pc.addTrack(audioTrack, localStreamRef.current);
+        audioSendersRef.current.set(peerSocketId, sender);
+      } else {
+        const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
+        audioSendersRef.current.set(peerSocketId, transceiver.sender);
+      }
+
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        const sender = pc.addTrack(videoTrack, localStreamRef.current);
+        videoSendersRef.current.set(peerSocketId, sender);
+      } else {
+        const transceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+        videoSendersRef.current.set(peerSocketId, transceiver.sender);
+      }
+    } else {
+      const audioTransceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
+      audioSendersRef.current.set(peerSocketId, audioTransceiver.sender);
+
+      const videoTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+      videoSendersRef.current.set(peerSocketId, videoTransceiver.sender);
     }
 
     // Add screen tracks (video and audio) if currently sharing
@@ -185,6 +224,8 @@ export function useWebRTC(roomId, iceServers = []) {
       pc.close();
       peerConnectionsRef.current.delete(peerSocketId);
     }
+    audioSendersRef.current.delete(peerSocketId);
+    videoSendersRef.current.delete(peerSocketId);
     screenSendersRef.current.delete(peerSocketId);
     iceCandidatesQueueRef.current.delete(peerSocketId);
     removeRemotePeer(peerSocketId);
@@ -206,41 +247,149 @@ export function useWebRTC(roomId, iceServers = []) {
     }
   }, [createPeerConnection, socket]);
 
-  // Toggle Microphone
-  const toggleAudio = useCallback(() => {
-    if (localStreamRef.current) {
-      const audioTracks = localStreamRef.current.getAudioTracks();
-      if (audioTracks.length > 0) {
-        const nextState = !audioTracks[0].enabled;
-        audioTracks.forEach(t => { t.enabled = nextState; });
-        setIsAudioMuted(!nextState);
-
-        socket.emit('media-state-change', {
-          audio: nextState,
-          video: !isVideoMuted,
-          screen: isScreenSharing
+  // Toggle Microphone (Completely turns off physical mic hardware when muted)
+  const toggleAudio = useCallback(async () => {
+    if (!isAudioMuted) {
+      // 1. Turning OFF: Stop hardware audio track completely
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach(track => {
+          track.stop(); // Stops physical mic hardware
+          localStreamRef.current.removeTrack(track);
         });
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      }
+
+      // 2. Clear track on all peer connections
+      audioSendersRef.current.forEach(sender => {
+        try {
+          sender.replaceTrack(null);
+        } catch (e) {
+          console.warn('Error clearing audio sender track:', e);
+        }
+      });
+
+      setIsAudioMuted(true);
+
+      socket.emit('media-state-change', {
+        audio: false,
+        video: !isVideoMuted,
+        screen: isScreenSharing
+      });
+    } else {
+      // Turning ON: Re-acquire microphone from browser
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+        const newAudioTrack = stream.getAudioTracks()[0];
+        if (newAudioTrack) {
+          if (!localStreamRef.current) {
+            localStreamRef.current = new MediaStream();
+          }
+          localStreamRef.current.addTrack(newAudioTrack);
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+
+          // Replace track on all existing peer connections
+          peerConnectionsRef.current.forEach((pc, peerSocketId) => {
+            const sender = audioSendersRef.current.get(peerSocketId);
+            if (sender) {
+              sender.replaceTrack(newAudioTrack);
+            } else {
+              const newSender = pc.addTrack(newAudioTrack, localStreamRef.current);
+              audioSendersRef.current.set(peerSocketId, newSender);
+              initiateOffer(peerSocketId);
+            }
+          });
+
+          setIsAudioMuted(false);
+
+          socket.emit('media-state-change', {
+            audio: true,
+            video: !isVideoMuted,
+            screen: isScreenSharing
+          });
+        }
+      } catch (err) {
+        console.error('Failed to restart microphone:', err);
       }
     }
-  }, [isVideoMuted, isScreenSharing, socket]);
+  }, [isAudioMuted, isVideoMuted, isScreenSharing, socket, initiateOffer]);
 
-  // Toggle Camera
-  const toggleVideo = useCallback(() => {
-    if (localStreamRef.current) {
-      const videoTracks = localStreamRef.current.getVideoTracks();
-      if (videoTracks.length > 0) {
-        const nextState = !videoTracks[0].enabled;
-        videoTracks.forEach(t => { t.enabled = nextState; });
-        setIsVideoMuted(!nextState);
-
-        socket.emit('media-state-change', {
-          audio: !isAudioMuted,
-          video: nextState,
-          screen: isScreenSharing
+  // Toggle Camera (Completely turns off webcam sensor & green light when off)
+  const toggleVideo = useCallback(async () => {
+    if (!isVideoMuted) {
+      // 1. Turning OFF: Stop hardware camera track completely
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach(track => {
+          track.stop(); // Stops physical webcam hardware! Green LED turns OFF!
+          localStreamRef.current.removeTrack(track);
         });
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      }
+
+      // 2. Clear track on all peer connections
+      videoSendersRef.current.forEach(sender => {
+        try {
+          sender.replaceTrack(null);
+        } catch (e) {
+          console.warn('Error clearing video sender track:', e);
+        }
+      });
+
+      setIsVideoMuted(true);
+
+      socket.emit('media-state-change', {
+        audio: !isAudioMuted,
+        video: false,
+        screen: isScreenSharing
+      });
+    } else {
+      // Turning ON: Re-acquire camera from browser
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          }
+        });
+        const newVideoTrack = stream.getVideoTracks()[0];
+        if (newVideoTrack) {
+          if (!localStreamRef.current) {
+            localStreamRef.current = new MediaStream();
+          }
+          localStreamRef.current.addTrack(newVideoTrack);
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+
+          // Replace track on all existing peer connections
+          peerConnectionsRef.current.forEach((pc, peerSocketId) => {
+            const sender = videoSendersRef.current.get(peerSocketId);
+            if (sender) {
+              sender.replaceTrack(newVideoTrack);
+            } else {
+              const newSender = pc.addTrack(newVideoTrack, localStreamRef.current);
+              videoSendersRef.current.set(peerSocketId, newSender);
+              initiateOffer(peerSocketId);
+            }
+          });
+
+          setIsVideoMuted(false);
+
+          socket.emit('media-state-change', {
+            audio: !isAudioMuted,
+            video: true,
+            screen: isScreenSharing
+          });
+        }
+      } catch (err) {
+        console.error('Failed to restart camera:', err);
       }
     }
-  }, [isAudioMuted, isScreenSharing, socket]);
+  }, [isVideoMuted, isAudioMuted, isScreenSharing, socket, initiateOffer]);
 
   // Stop Screen Share
   const stopScreenShare = useCallback(() => {

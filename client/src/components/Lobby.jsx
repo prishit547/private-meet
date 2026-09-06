@@ -45,20 +45,72 @@ export function Lobby({
     };
   }, []);
 
-  const toggleAudio = () => {
-    if (localStream) {
-      const tracks = localStream.getAudioTracks();
-      tracks.forEach(t => { t.enabled = !audioEnabled; });
+  const toggleAudio = async () => {
+    if (audioEnabled) {
+      // Release physical microphone hardware
+      if (localStream) {
+        localStream.getAudioTracks().forEach(t => {
+          t.stop();
+          localStream.removeTrack(t);
+        });
+      }
+      setAudioEnabled(false);
+    } else {
+      // Re-activate physical microphone hardware
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const newTrack = audioStream.getAudioTracks()[0];
+        if (newTrack) {
+          if (localStream) {
+            localStream.addTrack(newTrack);
+          } else {
+            const stream = new MediaStream([newTrack]);
+            setLocalStream(stream);
+          }
+          setAudioEnabled(true);
+        }
+      } catch (err) {
+        console.warn('Microphone permission denied or failed:', err);
+      }
     }
-    setAudioEnabled(!audioEnabled);
   };
 
-  const toggleVideo = () => {
-    if (localStream) {
-      const tracks = localStream.getVideoTracks();
-      tracks.forEach(t => { t.enabled = !videoEnabled; });
+  const toggleVideo = async () => {
+    if (videoEnabled) {
+      // Release physical webcam hardware (green LED turns OFF)
+      if (localStream) {
+        localStream.getVideoTracks().forEach(t => {
+          t.stop();
+          localStream.removeTrack(t);
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
+      }
+      setVideoEnabled(false);
+    } else {
+      // Re-activate physical webcam hardware (green LED turns ON)
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 } }
+        });
+        const newTrack = videoStream.getVideoTracks()[0];
+        if (newTrack) {
+          let targetStream = localStream;
+          if (!targetStream) {
+            targetStream = new MediaStream();
+            setLocalStream(targetStream);
+          }
+          targetStream.addTrack(newTrack);
+          if (videoRef.current) {
+            videoRef.current.srcObject = targetStream;
+          }
+          setVideoEnabled(true);
+        }
+      } catch (err) {
+        console.warn('Camera permission denied or failed:', err);
+      }
     }
-    setVideoEnabled(!videoEnabled);
   };
 
   const handleJoinClick = (e) => {
