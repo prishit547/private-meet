@@ -49,7 +49,7 @@ npm run build
 # Start the production server
 npm start
 ```
-- Server will listen on `http://0.0.0.0:3000`.
+- Server will listen on `http://0.0.0.0:7842`.
 
 ---
 
@@ -60,7 +60,7 @@ Modern browsers (Chrome, Firefox, Safari, Edge) strictly require a **Secure Cont
 - `navigator.mediaDevices.getDisplayMedia` (Screen Sharing)
 
 ### Option A: Testing on Localhost
-If testing locally on the same laptop with multiple browser tabs or an incognito window, `http://localhost:3000` works out of the box.
+If testing locally on the same laptop with multiple browser tabs or an incognito window, `http://localhost:7842` works out of the box.
 
 ### Option B: Enabling HTTPS for LAN / External Access
 
@@ -73,7 +73,7 @@ If testing locally on the same laptop with multiple browser tabs or an incognito
 
 2. Edit `server/.env`:
    ```ini
-   PORT=3000
+   PORT=7842
    HOST=0.0.0.0
    USE_HTTPS=true
    SSL_KEY_PATH=./certs/key.pem
@@ -84,14 +84,14 @@ If testing locally on the same laptop with multiple browser tabs or an incognito
    ```bash
    npm start
    ```
-   Now access via `https://<your-ip>:3000`.
+   Now access via `https://<your-ip>:7842`.
 
 ### Option C: Reverse Proxy (Recommended for Production)
 Put an Nginx or Caddy reverse proxy with Let's Encrypt SSL in front of the Node server:
 ```caddy
 # Example Caddyfile:
 meet.yourdomain.com {
-    reverse_proxy localhost:3000
+    reverse_proxy localhost:7842
 }
 ```
 

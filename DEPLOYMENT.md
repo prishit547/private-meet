@@ -15,7 +15,7 @@ This guide walks you through deploying **PrivateMeet** using Docker Compose and 
   (Cloudflare Tunnel)
        │
   (cloudflared daemon on host)
-       │  http://127.0.0.1:3000
+       │  http://127.0.0.1:7842
        ▼
 [Docker Container: private-meet]
   - Node.js Express + Socket.IO (Signaling)
@@ -34,10 +34,10 @@ This guide walks you through deploying **PrivateMeet** using Docker Compose and 
 ## 1️⃣ Launching with Docker Compose
 
 1. Make sure **Docker Desktop** (or your Docker engine) is running on your machine.
-2. If you currently have the local dev server running on port 3000, stop it first:
+2. If you currently have the local dev server running on port 7842, stop it first:
    ```bash
    # (Optional) Stop local node process if running
-   lsof -ti:3000 | xargs kill -9
+   lsof -ti:7842 | xargs kill -9
    ```
 3. Build and launch the container in detached mode:
    ```bash
@@ -49,7 +49,7 @@ This guide walks you through deploying **PrivateMeet** using Docker Compose and 
    ```
    You can also test the local health endpoint:
    ```bash
-   curl http://127.0.0.1:3000/api/health
+   curl http://127.0.0.1:7842/api/health
    # Expected output: {"status":"ok","time":"..."}
    ```
 
@@ -70,7 +70,7 @@ You can route your subdomain to the Docker container either via the **Cloudflare
    - **Domain**: Select your domain from the dropdown (e.g. `yourdomain.com`)
    - **Path**: *(leave empty)*
    - **Type**: `HTTP`
-   - **URL**: `127.0.0.1:3000` *(or `localhost:3000`)*
+   - **URL**: `127.0.0.1:7842` *(or `localhost:7842`)*
 6. Under **Additional application settings** ➔ **HTTP Settings**:
    - Ensure standard HTTP settings are default (Cloudflare automatically proxies WebSockets).
 7. Click **Save hostname**.
@@ -89,7 +89,7 @@ If you manage your tunnel through a configuration file (typically at `~/.cloudfl
    ingress:
      # Route your custom subdomain to Docker
      - hostname: meet.yourdomain.com
-       service: http://127.0.0.1:3000
+       service: http://127.0.0.1:7842
 
      # Fallback rule
      - service: http_status:404
