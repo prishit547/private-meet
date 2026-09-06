@@ -254,13 +254,24 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 7. Real-Time In-Call Chat
-  socket.on('chat-message', ({ roomId, message }) => {
+  // 7. Real-Time In-Call Chat (supports room-wide and direct private messaging)
+  socket.on('chat-message', ({ roomId, message, targetSocketId }) => {
     const room = roomManager.getRoom(roomId);
     if (!room) return;
 
     const sender = room.participants.get(socket.id);
     if (!sender) return;
+
+    let isDirect = false;
+    let targetName = null;
+
+    if (targetSocketId && targetSocketId !== 'everyone') {
+      const recipient = room.participants.get(targetSocketId);
+      if (recipient) {
+        isDirect = true;
+        targetName = recipient.name;
+      }
+    }
 
     const chatPayload = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -268,10 +279,20 @@ io.on('connection', (socket) => {
       senderName: sender.name,
       role: sender.role,
       message,
+      isDirect,
+      targetSocketId: isDirect ? targetSocketId : null,
+      targetName: isDirect ? targetName : null,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    io.to(roomId).emit('chat-message', chatPayload);
+    if (isDirect) {
+      // Send only to the recipient and back to the sender
+      io.to(targetSocketId).emit('chat-message', chatPayload);
+      socket.emit('chat-message', chatPayload);
+    } else {
+      // Broadcast to everyone in the room
+      io.to(roomId).emit('chat-message', chatPayload);
+    }
   });
 
   // 8. Host Administrative Controls

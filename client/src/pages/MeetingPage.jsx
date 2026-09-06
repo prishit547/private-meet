@@ -7,6 +7,28 @@ import { ControlBar } from '../components/ControlBar.jsx';
 import { WaitingRoomModal } from '../components/WaitingRoomModal.jsx';
 import { ParticipantsDrawer } from '../components/ParticipantsDrawer.jsx';
 import { ChatDrawer } from '../components/ChatDrawer.jsx';
+import { ChatToast } from '../components/ChatToast.jsx';
+
+// Gentle pop sound for incoming messages
+function playChatChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.15);
+  } catch (e) {}
+}
 
 // Gentle two-tone doorbell chime using Web Audio API
 function playKnockChime() {
@@ -86,6 +108,7 @@ export function MeetingPage({ roomId, onLeave }) {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [chatMessages, setChatMessages] = useState([]);
+  const [toastMessage, setToastMessage] = useState(null);
 
   const socket = getSocket();
 
@@ -266,12 +289,20 @@ export function MeetingPage({ roomId, onLeave }) {
     // In-call Chat Message
     const handleChatMessage = (message) => {
       setChatMessages(prev => [...prev, message]);
-      if (!isChatOpen) {
-        setUnreadChatCount(prev => prev + 1);
-      }
-      if (document.hidden) {
-        showDesktopNotification(`💬 ${message.senderName}`, message.message);
-        document.title = `💬 ${message.senderName}: ${message.message}`;
+
+      // If message is from someone else:
+      if (message.senderId !== socket.id) {
+        playChatChime();
+
+        if (!isChatOpen) {
+          setUnreadChatCount(prev => prev + 1);
+          setToastMessage(message); // Displays the on-screen floating toast notification
+        }
+
+        if (document.hidden) {
+          showDesktopNotification(`💬 ${message.senderName}`, message.message);
+          document.title = `💬 ${message.senderName}: ${message.message}`;
+        }
       }
     };
 
@@ -335,14 +366,21 @@ export function MeetingPage({ roomId, onLeave }) {
     }
   };
 
-  const handleSendMessage = (text) => {
-    socket.emit('chat-message', { roomId, message: text });
+  const handleSendMessage = (text, targetRecipientId = 'everyone') => {
+    socket.emit('chat-message', {
+      roomId,
+      message: text,
+      targetSocketId: targetRecipientId
+    });
   };
 
-  // Toggle chat and reset unread badge
+  // Toggle chat and reset unread badge and active toast
   const toggleChat = () => {
     setIsChatOpen(prev => {
-      if (!prev) setUnreadChatCount(0);
+      if (!prev) {
+        setUnreadChatCount(0);
+        setToastMessage(null);
+      }
       return !prev;
     });
   };
@@ -405,8 +443,20 @@ export function MeetingPage({ roomId, onLeave }) {
           messages={chatMessages}
           onSendMessage={handleSendMessage}
           currentUserId={socket.id}
+          participants={participants}
         />
       </div>
+
+      {/* On-Screen Floating Message Toast (Alerts when Chat is Closed) */}
+      <ChatToast
+        toastMessage={toastMessage}
+        onOpenChat={() => {
+          setIsChatOpen(true);
+          setUnreadChatCount(0);
+          setToastMessage(null);
+        }}
+        onDismiss={() => setToastMessage(null)}
+      />
 
       {/* Bottom Floating Control Bar */}
       <ControlBar

@@ -81,7 +81,7 @@ async function runTest() {
 
   await signalPromise;
 
-  // 7. Test in-call chat
+  // 7. Test in-call chat (broadcast and direct private message)
   const chatPromise = new Promise((resolve) => {
     hostSocket.on('chat-message', (msg) => {
       console.log(`✓ Host received chat message from ${msg.senderName}: "${msg.message}"`);
@@ -95,6 +95,24 @@ async function runTest() {
   });
 
   await chatPromise;
+
+  // Test direct 1-on-1 private message
+  const directPromise = new Promise((resolve) => {
+    guestSocket.on('chat-message', (msg) => {
+      if (msg.isDirect) {
+        console.log(`✓ Guest received direct private message from ${msg.senderName}: "${msg.message}" (target: ${msg.targetName})`);
+        resolve();
+      }
+    });
+  });
+
+  hostSocket.emit('chat-message', {
+    roomId: createdRoomId,
+    message: 'This is a private message to Bob',
+    targetSocketId: guestSocket.id
+  });
+
+  await directPromise;
 
   // 8. Test host ending meeting
   const endPromise = new Promise((resolve) => {

@@ -28,3 +28,16 @@
 .mirror-video {
   transform: scaleX(-1);
 }
+
+@keyframes shrink {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.animate-shrink {
+  animation: shrink 6s linear forwards;
+}
