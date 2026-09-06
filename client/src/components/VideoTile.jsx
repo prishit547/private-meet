@@ -36,8 +36,12 @@ export function VideoTile({
   // Bind media stream to HTML5 Video element
   useEffect(() => {
     if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+      }
       videoRef.current.play().catch(() => {});
+    } else if (videoRef.current && !stream) {
+      videoRef.current.srcObject = null;
     }
   }, [stream]);
 
@@ -110,7 +114,12 @@ export function VideoTile({
     .substring(0, 2)
     .toUpperCase() || 'U';
 
-  const hasVideo = stream && stream.getVideoTracks().length > 0 && !isVideoMuted;
+  const hasVideo = Boolean(
+    stream &&
+    stream.getVideoTracks().length > 0 &&
+    stream.getVideoTracks().some((t) => t.readyState === 'live') &&
+    !isVideoMuted
+  );
 
   return (
     <div
@@ -130,6 +139,7 @@ export function VideoTile({
         autoPlay
         playsInline
         muted
+        onLoadedMetadata={() => videoRef.current?.play().catch(() => {})}
         className={`w-full h-full ${
           isScreenTile
             ? fitMode === 'cover'

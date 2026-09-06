@@ -58,7 +58,13 @@ export function VideoGrid({
   // 3. Remote peer tiles
   remotePeers.forEach((peer, socketId) => {
     // Remote screen tile (if peer is sharing screen)
-    if (peer.mediaState?.screen && peer.screenStream) {
+    const hasRemoteScreen = Boolean(
+      (peer.mediaState?.screen || (peer.screenStream && peer.screenStream.getVideoTracks().length > 0)) &&
+      peer.screenStream &&
+      peer.screenStream.getVideoTracks().some(t => t.readyState === 'live')
+    );
+
+    if (hasRemoteScreen) {
       tiles.push({
         id: `remote-${socketId}-screen`,
         stream: peer.screenStream,
@@ -71,14 +77,17 @@ export function VideoGrid({
       });
     }
 
-    // Remote camera tile
+    // Remote camera tile (safely check mediaState so undefined never falsely hides video)
+    const isPeerAudioMuted = peer.mediaState ? peer.mediaState.audio === false : false;
+    const isPeerVideoMuted = peer.mediaState ? peer.mediaState.video === false : false;
+
     tiles.push({
       id: `remote-${socketId}-camera`,
       stream: peer.stream,
       name: peer.name || 'Guest',
       isLocal: false,
-      isAudioMuted: !peer.mediaState?.audio,
-      isVideoMuted: !peer.mediaState?.video,
+      isAudioMuted: isPeerAudioMuted,
+      isVideoMuted: isPeerVideoMuted,
       isScreenTile: false,
       role: peer.role || 'guest'
     });

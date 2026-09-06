@@ -153,7 +153,8 @@ export function MeetingPage({ roomId, onLeave }) {
     audioOutputDevices,
     selectedAudioOutput,
     switchAudioOutput,
-    refreshAudioDevices
+    refreshAudioDevices,
+    syncRoomParticipants
   } = useWebRTC(roomId, iceServers);
 
   // Check if Host reconnecting or autojoin
@@ -169,6 +170,10 @@ export function MeetingPage({ roomId, onLeave }) {
     setJoinError('');
     localStorage.setItem('pm_username', name);
 
+    // Eagerly warm up camera and microphone while knocking / joining
+    // This prevents asymmetric transceiver negotiation race condition when admitted
+    startLocalStream(audioInitial, videoInitial);
+
     socket.emit('join-room', {
       roomId,
       hostToken: forceHost ? hostToken : (isHostPreset ? hostToken : null),
@@ -183,7 +188,10 @@ export function MeetingPage({ roomId, onLeave }) {
         if (response.waitingList) setWaitingList(response.waitingList);
         if (response.iceServers) setIceServers(response.iceServers);
 
-        // Start local media tracks
+        // Sync existing room participants with WebRTC state
+        syncRoomParticipants(response.participants || []);
+
+        // Ensure local media tracks are ready
         await startLocalStream(audioInitial, videoInitial);
       } else if (response.status === 'waiting') {
         setJoinStatus('waiting');
@@ -194,7 +202,7 @@ export function MeetingPage({ roomId, onLeave }) {
         setJoinError(response.message || 'Could not join meeting.');
       }
     });
-  }, [roomId, hostToken, isHostPreset, userName, socket, startLocalStream]);
+  }, [roomId, hostToken, isHostPreset, userName, socket, startLocalStream, syncRoomParticipants]);
 
   // Socket Event Listeners for Room Orchestration
   useEffect(() => {
@@ -205,6 +213,9 @@ export function MeetingPage({ roomId, onLeave }) {
       setJoinStatus('admitted');
       setParticipants(data.participants || []);
       if (data.iceServers) setIceServers(data.iceServers);
+
+      // Immediately sync room participants so remotePeers has host's info and media state
+      syncRoomParticipants(data.participants || []);
 
       await startLocalStream(true, true);
     };
