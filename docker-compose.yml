@@ -1,0 +1,25 @@
+services:
+  private-meet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: private-meet
+    restart: unless-stopped
+    ports:
+      # Exposes port 3000 to localhost so Cloudflare Tunnel can route directly to it.
+      # (If you also want direct LAN access without Cloudflare, change to "3000:3000")
+      - "127.0.0.1:3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      # Optional: custom TURN server for restrictive symmetric NATs
+      # - TURN_SERVER_URL=turn:your-turn-domain.com:3478
+      # - TURN_USERNAME=user
+      # - TURN_PASSWORD=pass
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

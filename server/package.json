@@ -1,0 +1,19 @@
+{
+  "name": "screen-sharing-server",
+  "version": "1.0.0",
+  "description": "Private WebRTC signaling and room management server",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3",
+    "uuid": "^9.0.1"
+  }
+}

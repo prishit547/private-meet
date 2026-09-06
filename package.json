@@ -1,0 +1,16 @@
+{
+  "name": "private-screen-sharing-app",
+  "version": "1.0.0",
+  "description": "Private, self-hosted WebRTC video calling and screen sharing application",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "node -e \"const { spawn } = require('child_process'); spawn('npm', ['--prefix', 'server', 'run', 'dev'], { stdio: 'inherit', shell: true }); spawn('npm', ['--prefix', 'client', 'run', 'dev'], { stdio: 'inherit', shell: true });\""
+  },
+  "keywords": ["webrtc", "screen-sharing", "video-conferencing", "self-hosted", "privacy"],
+  "author": "",
+  "license": "ISC"
+}
