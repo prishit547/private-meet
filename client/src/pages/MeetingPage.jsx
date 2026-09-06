@@ -8,6 +8,67 @@ import { WaitingRoomModal } from '../components/WaitingRoomModal.jsx';
 import { ParticipantsDrawer } from '../components/ParticipantsDrawer.jsx';
 import { ChatDrawer } from '../components/ChatDrawer.jsx';
 
+// Gentle two-tone doorbell chime using Web Audio API
+function playKnockChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    // First tone: 587.33 Hz (D5)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now);
+    gain1.gain.setValueAtTime(0.18, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.35);
+
+    // Second tone: 880 Hz (A5)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.16);
+    gain2.gain.setValueAtTime(0.22, now + 0.16);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.16);
+    osc2.stop(now + 0.65);
+  } catch (e) {
+    console.warn('Could not play audio chime:', e);
+  }
+}
+
+// Native OS desktop notification
+function showDesktopNotification(title, body) {
+  if (!('Notification' in window)) return;
+
+  if (Notification.permission === 'granted') {
+    try {
+      const notification = new Notification(title, {
+        body,
+        icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%238ab4f8'><path d='M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z'/></svg>",
+        tag: 'guest-knock',
+        requireInteraction: true // Stays visible until host clicks or dismisses it
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+    } catch (e) {
+      console.warn('Desktop notification error:', e);
+    }
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission();
+  }
+}
+
 export function MeetingPage({ roomId, onLeave }) {
   const [userName, setUserName] = useState(() => {
     return localStorage.getItem('pm_username') || '';
@@ -31,6 +92,22 @@ export function MeetingPage({ roomId, onLeave }) {
   // Host token stored in localStorage for this roomId (if user created it)
   const hostToken = localStorage.getItem(`pm_host_token_${roomId}`);
   const isHostPreset = Boolean(hostToken);
+
+  // Request browser notification permission for host
+  useEffect(() => {
+    if (role === 'host' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, [role]);
+
+  // Reset tab title when user refocuses the tab
+  useEffect(() => {
+    const handleFocus = () => {
+      document.title = 'Private Meet - Secure Screen Sharing & Video';
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
 
   // WebRTC Hook
   const {
@@ -128,6 +205,13 @@ export function MeetingPage({ roomId, onLeave }) {
     // Host receives knocking guest
     const handleGuestKnock = ({ guest }) => {
       console.log('[Host Alert] Guest knock:', guest);
+      playKnockChime();
+      showDesktopNotification(
+        '👋 Guest Waiting to Join',
+        `${guest.name} is in the waiting room and wants to enter the call.`
+      );
+      document.title = `🔔 ${guest.name} wants to join! - PrivateMeet`;
+
       setWaitingList(prev => {
         if (prev.some(g => g.socketId === guest.socketId)) return prev;
         return [...prev, guest];
@@ -136,7 +220,13 @@ export function MeetingPage({ roomId, onLeave }) {
 
     // Knocking guest leaves waiting room
     const handleGuestKnockCancelled = ({ socketId }) => {
-      setWaitingList(prev => prev.filter(g => g.socketId !== socketId));
+      setWaitingList(prev => {
+        const next = prev.filter(g => g.socketId !== socketId);
+        if (next.length === 0) {
+          document.title = 'Private Meet - Secure Screen Sharing & Video';
+        }
+        return next;
+      });
     };
 
     // New participant joined the room
@@ -146,7 +236,13 @@ export function MeetingPage({ roomId, onLeave }) {
         return [...prev, participant];
       });
       // Remove from waiting list if they were there
-      setWaitingList(prev => prev.filter(g => g.socketId !== participant.socketId));
+      setWaitingList(prev => {
+        const next = prev.filter(g => g.socketId !== participant.socketId);
+        if (next.length === 0) {
+          document.title = 'Private Meet - Secure Screen Sharing & Video';
+        }
+        return next;
+      });
     };
 
     // Participant left
@@ -172,6 +268,10 @@ export function MeetingPage({ roomId, onLeave }) {
       setChatMessages(prev => [...prev, message]);
       if (!isChatOpen) {
         setUnreadChatCount(prev => prev + 1);
+      }
+      if (document.hidden) {
+        showDesktopNotification(`💬 ${message.senderName}`, message.message);
+        document.title = `💬 ${message.senderName}: ${message.message}`;
       }
     };
 
