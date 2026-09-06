@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Mic,
   MicOff,
@@ -10,7 +10,9 @@ import {
   MessageSquare,
   Link2,
   Check,
-  ShieldAlert
+  ShieldAlert,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 
 export function ControlBar({
@@ -34,6 +36,24 @@ export function ControlBar({
 }) {
   const [copied, setCopied] = useState(false);
   const [showLeaveMenu, setShowLeaveMenu] = useState(false);
+  const [isMeetingFullscreen, setIsMeetingFullscreen] = useState(false);
+
+  // Sync fullscreen state with document events
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsMeetingFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleMeetingFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
 
   const handleCopyLink = () => {
     const url = window.location.href;
@@ -158,8 +178,19 @@ export function ControlBar({
         </div>
       </div>
 
-      {/* Right: Side Drawer Toggles (Participants & Chat) */}
+      {/* Right: Side Drawer Toggles & Meeting Fullscreen */}
       <div className="flex items-center justify-end gap-2 w-1/4">
+        {/* Meeting Fullscreen Button */}
+        <button
+          onClick={toggleMeetingFullscreen}
+          className={`p-3 rounded-full transition-colors ${
+            isMeetingFullscreen ? 'bg-white/20 text-meet-accent' : 'hover:bg-white/10 text-gray-300'
+          }`}
+          title={isMeetingFullscreen ? 'Exit Fullscreen (Esc)' : 'Fullscreen Meeting'}
+        >
+          {isMeetingFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+        </button>
+
         {/* Participants Button */}
         <button
           onClick={toggleParticipants}
