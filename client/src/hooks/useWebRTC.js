@@ -70,20 +70,31 @@ export function useWebRTC(roomId, iceServers = []) {
 
       // 1. Microphone Hardware
       if (audioInitial) {
+        let audioStream = null;
         try {
-          const audioStream = await navigator.mediaDevices.getUserMedia({
+          audioStream = await navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: true,
               noiseSuppression: true,
               autoGainControl: true
             }
           });
+        } catch (micErr) {
+          console.warn('Advanced audio constraints failed, falling back to basic audio:', micErr);
+          try {
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          } catch (fallbackErr) {
+            console.error('Microphone access completely denied or unavailable:', fallbackErr);
+          }
+        }
+
+        if (audioStream) {
           audioStream.getAudioTracks().forEach(track => {
+            track.enabled = true;
             stream.addTrack(track);
           });
           setIsAudioMuted(false);
-        } catch (err) {
-          console.warn('Audio acquisition failed:', err);
+        } else {
           setIsAudioMuted(true);
         }
       } else {
@@ -101,6 +112,7 @@ export function useWebRTC(roomId, iceServers = []) {
             }
           });
           videoStream.getVideoTracks().forEach(track => {
+            track.enabled = true;
             stream.addTrack(track);
           });
           setIsVideoMuted(false);
@@ -113,6 +125,40 @@ export function useWebRTC(roomId, iceServers = []) {
       }
 
       setLocalStream(stream);
+
+      // CRUCIAL: Immediately attach newly acquired tracks to any peer connections that already exist
+      const audioTrack = stream.getAudioTracks()[0];
+      const videoTrack = stream.getVideoTracks()[0];
+
+      peerConnectionsRef.current.forEach((pc, peerSocketId) => {
+        if (audioTrack) {
+          const sender = audioSendersRef.current.get(peerSocketId);
+          if (sender) {
+            try {
+              sender.replaceTrack(audioTrack);
+            } catch (e) {
+              console.warn(`[WebRTC] replaceTrack audio error for ${peerSocketId}:`, e);
+            }
+          } else {
+            const newSender = pc.addTrack(audioTrack, stream);
+            audioSendersRef.current.set(peerSocketId, newSender);
+          }
+        }
+        if (videoTrack) {
+          const sender = videoSendersRef.current.get(peerSocketId);
+          if (sender) {
+            try {
+              sender.replaceTrack(videoTrack);
+            } catch (e) {
+              console.warn(`[WebRTC] replaceTrack video error for ${peerSocketId}:`, e);
+            }
+          } else {
+            const newSender = pc.addTrack(videoTrack, stream);
+            videoSendersRef.current.set(peerSocketId, newSender);
+          }
+        }
+      });
+
       return stream;
     } catch (err) {
       console.error('Failed to get any local media stream:', err);
@@ -179,31 +225,36 @@ export function useWebRTC(roomId, iceServers = []) {
 
     // Handle incoming remote media tracks
     pc.ontrack = (event) => {
-      const [remoteStream] = event.streams;
       const track = event.track;
+      console.log(`[WebRTC] ontrack from ${peerSocketId}: kind=${track.kind}, id=${track.id}`);
 
       updateRemotePeer(peerSocketId, (peer) => {
-        // If track belongs to a screen share stream (distinct ID or designated)
-        if (peer.mediaState?.screen && peer.stream && remoteStream.id !== peer.stream.id) {
+        // Distinguish screen share stream from primary webcam/mic
+        const isScreen = peer.mediaState?.screen && (
+          (event.streams[0] && peer.stream && event.streams[0].id !== peer.stream.id)
+        );
+
+        if (isScreen) {
+          const currentScreen = peer.screenStream || new MediaStream();
+          if (!currentScreen.getTracks().some(t => t.id === track.id)) {
+            currentScreen.addTrack(track);
+          }
           return {
             ...peer,
-            screenStream: remoteStream
+            screenStream: new MediaStream(currentScreen.getTracks())
           };
         }
 
-        // Primary camera + audio stream
-        if (!peer.stream) {
-          return {
-            ...peer,
-            stream: remoteStream
-          };
-        } else {
-          // Add track to existing stream if not present
-          if (!peer.stream.getTracks().some(t => t.id === track.id)) {
-            peer.stream.addTrack(track);
-          }
-          return { ...peer };
+        // Primary camera + microphone stream
+        const currentStream = peer.stream || new MediaStream();
+        if (!currentStream.getTracks().some(t => t.id === track.id)) {
+          currentStream.addTrack(track);
         }
+        // Always create a new MediaStream instance so React detects the update
+        return {
+          ...peer,
+          stream: new MediaStream(currentStream.getTracks())
+        };
       });
     };
 
@@ -235,6 +286,25 @@ export function useWebRTC(roomId, iceServers = []) {
   const initiateOffer = useCallback(async (peerSocketId) => {
     try {
       const pc = createPeerConnection(peerSocketId);
+
+      // Ensure any existing local tracks are attached before creating offer
+      if (localStreamRef.current) {
+        const audioTrack = localStreamRef.current.getAudioTracks()[0];
+        if (audioTrack) {
+          const sender = audioSendersRef.current.get(peerSocketId);
+          if (sender && sender.track !== audioTrack) {
+            await sender.replaceTrack(audioTrack).catch(() => {});
+          }
+        }
+        const videoTrack = localStreamRef.current.getVideoTracks()[0];
+        if (videoTrack) {
+          const sender = videoSendersRef.current.get(peerSocketId);
+          if (sender && sender.track !== videoTrack) {
+            await sender.replaceTrack(videoTrack).catch(() => {});
+          }
+        }
+      }
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -278,15 +348,23 @@ export function useWebRTC(roomId, iceServers = []) {
     } else {
       // Turning ON: Re-acquire microphone from browser
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        });
+        let stream = null;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+        } catch (micErr) {
+          console.warn('Advanced audio constraints failed on toggle, falling back to default:', micErr);
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+
         const newAudioTrack = stream.getAudioTracks()[0];
         if (newAudioTrack) {
+          newAudioTrack.enabled = true;
           if (!localStreamRef.current) {
             localStreamRef.current = new MediaStream();
           }
@@ -520,12 +598,48 @@ export function useWebRTC(roomId, iceServers = []) {
       console.log('[WebRTC] Received offer from:', from);
       try {
         const pc = createPeerConnection(from);
+
+        // Perfect Negotiation: Glare collision resolution
+        const isCollision = pc.signalingState !== 'stable';
+        if (isCollision) {
+          const isPolite = socket.id < from;
+          console.log(`[WebRTC] Offer collision with ${from}. isPolite: ${isPolite}, signalingState: ${pc.signalingState}`);
+          if (!isPolite) {
+            console.log(`[WebRTC] Impolite peer: ignoring incoming offer from ${from}`);
+            return;
+          }
+          console.log(`[WebRTC] Polite peer: rolling back local description for ${from}`);
+          await pc.setLocalDescription({ type: 'rollback' });
+        }
+
+        // Attach local tracks to senders if available before answering
+        if (localStreamRef.current) {
+          const audioTrack = localStreamRef.current.getAudioTracks()[0];
+          if (audioTrack) {
+            const sender = audioSendersRef.current.get(from);
+            if (sender && sender.track !== audioTrack) {
+              await sender.replaceTrack(audioTrack).catch(() => {});
+            }
+          }
+          const videoTrack = localStreamRef.current.getVideoTracks()[0];
+          if (videoTrack) {
+            const sender = videoSendersRef.current.get(from);
+            if (sender && sender.track !== videoTrack) {
+              await sender.replaceTrack(videoTrack).catch(() => {});
+            }
+          }
+        }
+
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
         // Drain queued ICE candidates
         const queuedCandidates = iceCandidatesQueueRef.current.get(from) || [];
         for (const candidate of queuedCandidates) {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.warn(`[WebRTC] Failed to add queued ICE candidate from ${from}:`, e);
+          }
         }
         iceCandidatesQueueRef.current.set(from, []);
 
@@ -547,12 +661,21 @@ export function useWebRTC(roomId, iceServers = []) {
       try {
         const pc = peerConnectionsRef.current.get(from);
         if (pc) {
+          if (pc.signalingState !== 'have-local-offer') {
+            console.warn(`[WebRTC] Ignoring answer from ${from} because state is ${pc.signalingState}`);
+            return;
+          }
+
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
           // Drain queued ICE candidates
           const queuedCandidates = iceCandidatesQueueRef.current.get(from) || [];
           for (const candidate of queuedCandidates) {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+              console.warn(`[WebRTC] Failed to add queued ICE candidate from ${from}:`, e);
+            }
           }
           iceCandidatesQueueRef.current.set(from, []);
         }

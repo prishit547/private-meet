@@ -8,6 +8,7 @@ import { WaitingRoomModal } from '../components/WaitingRoomModal.jsx';
 import { ParticipantsDrawer } from '../components/ParticipantsDrawer.jsx';
 import { ChatDrawer } from '../components/ChatDrawer.jsx';
 import { ChatToast } from '../components/ChatToast.jsx';
+import { RemoteAudioRenderer } from '../components/RemoteAudioRenderer.jsx';
 
 // Gentle pop sound for incoming messages
 function playChatChime() {
@@ -177,15 +178,6 @@ export function MeetingPage({ roomId, onLeave }) {
 
         // Start local media tracks
         await startLocalStream(audioInitial, videoInitial);
-
-        // If newly admitted guest, connect to all existing participants
-        if (response.participants) {
-          response.participants.forEach(p => {
-            if (p.socketId !== socket.id) {
-              initiateOffer(p.socketId);
-            }
-          });
-        }
       } else if (response.status === 'waiting') {
         setJoinStatus('waiting');
       } else if (response.status === 'waiting_host') {
@@ -195,7 +187,7 @@ export function MeetingPage({ roomId, onLeave }) {
         setJoinError(response.message || 'Could not join meeting.');
       }
     });
-  }, [roomId, hostToken, isHostPreset, userName, socket, startLocalStream, initiateOffer]);
+  }, [roomId, hostToken, isHostPreset, userName, socket, startLocalStream]);
 
   // Socket Event Listeners for Room Orchestration
   useEffect(() => {
@@ -208,15 +200,6 @@ export function MeetingPage({ roomId, onLeave }) {
       if (data.iceServers) setIceServers(data.iceServers);
 
       await startLocalStream(true, true);
-
-      // Connect with existing participants
-      if (data.participants) {
-        data.participants.forEach(p => {
-          if (p.socketId !== socket.id) {
-            initiateOffer(p.socketId);
-          }
-        });
-      }
     };
 
     // Guest gets rejected by Host
@@ -413,6 +396,9 @@ export function MeetingPage({ roomId, onLeave }) {
           onAdmitAll={handleAdmitAll}
         />
       )}
+
+      {/* Dedicated Remote Audio Playback for macOS & Cross-Browser Stability */}
+      <RemoteAudioRenderer remotePeers={remotePeers} />
 
       {/* Main Video Area with Optional Side Drawers */}
       <div className="flex-1 flex overflow-hidden relative">

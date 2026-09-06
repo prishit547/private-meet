@@ -27,6 +27,10 @@ export function useAudioLevel(stream, enabled = true) {
       const audioContext = new AudioCtx();
       audioContextRef.current = audioContext;
 
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.4;

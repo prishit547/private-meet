@@ -37,6 +37,7 @@ export function VideoTile({
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
     }
   }, [stream]);
 
@@ -123,12 +124,12 @@ export function VideoTile({
           : 'border-white/10'
       }`}
     >
-      {/* Video Element */}
+      {/* Video Element (Muted so visual rendering never blocks or collides with dedicated audio) */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted={isLocal} // Mute local video to prevent audio loopback
+        muted
         className={`w-full h-full ${
           isScreenTile
             ? fitMode === 'cover'
