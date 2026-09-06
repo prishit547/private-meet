@@ -231,12 +231,12 @@ io.on('connection', (socket) => {
   });
 
   // 5. WebRTC Peer-to-Peer Signaling Relays
-  socket.on('signal-offer', ({ to, offer }) => {
-    io.to(to).emit('signal-offer', { from: socket.id, offer });
+  socket.on('signal-offer', (data) => {
+    io.to(data.to).emit('signal-offer', { ...data, from: socket.id });
   });
 
-  socket.on('signal-answer', ({ to, answer }) => {
-    io.to(to).emit('signal-answer', { from: socket.id, answer });
+  socket.on('signal-answer', (data) => {
+    io.to(data.to).emit('signal-answer', { ...data, from: socket.id });
   });
 
   socket.on('signal-ice-candidate', ({ to, candidate }) => {

@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 
 /**
- * Individual remote audio track player with macOS Safari/Chrome autoplay handling
+ * Individual remote audio track player with macOS Safari/Chrome autoplay handling and sinkId output routing
  */
-function RemoteAudioTrack({ stream, label, isMuted }) {
+function RemoteAudioTrack({ stream, label, isMuted, selectedAudioOutput }) {
   const audioRef = useRef(null);
 
   useEffect(() => {
@@ -49,6 +49,17 @@ function RemoteAudioTrack({ stream, label, isMuted }) {
     }
   }, [isMuted]);
 
+  // Direct audio output to selected speaker device if supported by browser
+  useEffect(() => {
+    if (audioRef.current && selectedAudioOutput && typeof audioRef.current.setSinkId === 'function') {
+      if (selectedAudioOutput !== 'default') {
+        audioRef.current.setSinkId(selectedAudioOutput).catch(err => {
+          console.warn('[Audio] Failed to set sink ID:', err);
+        });
+      }
+    }
+  }, [selectedAudioOutput]);
+
   return (
     <audio
       ref={audioRef}
@@ -71,7 +82,7 @@ function RemoteAudioTrack({ stream, label, isMuted }) {
  * Top-level Audio Renderer for all remote peers.
  * Stays mounted in MeetingPage regardless of grid layouts, spotlighting, or cinema mode.
  */
-export function RemoteAudioRenderer({ remotePeers }) {
+export function RemoteAudioRenderer({ remotePeers, selectedAudioOutput = 'default' }) {
   if (!remotePeers || remotePeers.size === 0) return null;
 
   const audioTracks = [];
@@ -86,6 +97,7 @@ export function RemoteAudioRenderer({ remotePeers }) {
           stream={peer.stream}
           label={peer.name || socketId}
           isMuted={isMuted}
+          selectedAudioOutput={selectedAudioOutput}
         />
       );
     }
@@ -98,6 +110,7 @@ export function RemoteAudioRenderer({ remotePeers }) {
           stream={peer.screenStream}
           label={`${peer.name || socketId} (Screen)`}
           isMuted={false}
+          selectedAudioOutput={selectedAudioOutput}
         />
       );
     }

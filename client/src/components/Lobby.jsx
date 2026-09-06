@@ -14,6 +14,10 @@ export function Lobby({
   const [localStream, setLocalStream] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioInputs, setAudioInputs] = useState([]);
+  const [selectedMic, setSelectedMic] = useState(() => {
+    return localStorage.getItem('preferred_mic_id') || 'default';
+  });
   const videoRef = useRef(null);
 
   // Initialize camera/mic preview
@@ -22,14 +26,24 @@ export function Lobby({
 
     async function initPreview() {
       try {
+        const preferredMicId = localStorage.getItem('preferred_mic_id') || 'default';
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 640 } },
-          audio: true
+          audio: preferredMicId && preferredMicId !== 'default'
+            ? { deviceId: { ideal: preferredMicId } }
+            : true
         });
         streamInstance = stream;
         setLocalStream(stream);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+        }
+
+        // Populate available microphones once permission is granted
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const inputs = devices.filter(d => d.kind === 'audioinput');
+          setAudioInputs(inputs);
         }
       } catch (err) {
         console.warn('Camera/mic preview failed or denied:', err);
@@ -44,6 +58,30 @@ export function Lobby({
       }
     };
   }, []);
+
+  const handleMicSelect = async (e) => {
+    const deviceId = e.target.value;
+    setSelectedMic(deviceId);
+    localStorage.setItem('preferred_mic_id', deviceId);
+
+    if (audioEnabled && localStream) {
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          audio: deviceId !== 'default' ? { deviceId: { exact: deviceId } } : true
+        });
+        const newTrack = newStream.getAudioTracks()[0];
+        if (newTrack) {
+          localStream.getAudioTracks().forEach(t => {
+            t.stop();
+            localStream.removeTrack(t);
+          });
+          localStream.addTrack(newTrack);
+        }
+      } catch (err) {
+        console.warn('Failed to switch microphone in preview:', err);
+      }
+    }
+  };
 
   const toggleAudio = async () => {
     if (audioEnabled) {
@@ -193,6 +231,25 @@ export function Lobby({
             </div>
           </div>
           <p className="mt-2 text-xs text-gray-400">Check your camera and microphone before joining</p>
+
+          {/* Microphone Selector in Lobby */}
+          {audioInputs.length > 0 && (
+            <div className="mt-3 w-full max-w-sm flex items-center gap-2 bg-meet-surface border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-300 shadow-md">
+              <Mic className="w-3.5 h-3.5 text-meet-accent flex-shrink-0" />
+              <select
+                value={selectedMic}
+                onChange={handleMicSelect}
+                className="bg-transparent text-gray-200 outline-none w-full truncate cursor-pointer text-xs"
+                title="Choose microphone"
+              >
+                {audioInputs.map((d, i) => (
+                  <option key={d.deviceId || i} value={d.deviceId} className="bg-[#1c1d22] text-white">
+                    {d.label || `Microphone ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Right: Meeting Join Form / Waiting States */}

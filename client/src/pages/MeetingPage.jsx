@@ -146,7 +146,14 @@ export function MeetingPage({ roomId, onLeave }) {
     toggleVideo,
     startScreenShare,
     stopScreenShare,
-    initiateOffer
+    initiateOffer,
+    audioDevices,
+    selectedAudioDevice,
+    switchAudioDevice,
+    audioOutputDevices,
+    selectedAudioOutput,
+    switchAudioOutput,
+    refreshAudioDevices
   } = useWebRTC(roomId, iceServers);
 
   // Check if Host reconnecting or autojoin
@@ -398,7 +405,7 @@ export function MeetingPage({ roomId, onLeave }) {
       )}
 
       {/* Dedicated Remote Audio Playback for macOS & Cross-Browser Stability */}
-      <RemoteAudioRenderer remotePeers={remotePeers} />
+      <RemoteAudioRenderer remotePeers={remotePeers} selectedAudioOutput={selectedAudioOutput} />
 
       {/* Main Video Area with Optional Side Drawers */}
       <div className="flex-1 flex overflow-hidden relative">
@@ -463,6 +470,13 @@ export function MeetingPage({ roomId, onLeave }) {
         isHost={role === 'host'}
         onEndMeeting={handleEndMeeting}
         roomId={roomId}
+        audioDevices={audioDevices}
+        selectedAudioDevice={selectedAudioDevice}
+        switchAudioDevice={switchAudioDevice}
+        audioOutputDevices={audioOutputDevices}
+        selectedAudioOutput={selectedAudioOutput}
+        switchAudioOutput={switchAudioOutput}
+        refreshAudioDevices={refreshAudioDevices}
       />
     </div>
   );
